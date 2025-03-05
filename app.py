@@ -7,17 +7,22 @@ import binascii
 
 from flask              import Flask, Response, request, render_template, send_from_directory, url_for, jsonify
 from threading          import Condition
-from multiprocessing    import shared_memory
+from multiprocessing    import Process, Value
 from picamera2          import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs  import FileOutput
 
 # Local
 from log import log
+from main import camera
 
 
 app = Flask("Image Gallery")
 app.config['IMAGE_EXTS'] = [".png", ".jpg", ".jpeg", ".gif", ".tiff"]
+
+photo_mode = Value('i', 1)
+photos = Process(target=camera, args=( photo_mode, os.path.join(app.config.root_path, "static/photos/"), False))
+photos.run()
 
 """
 User a shared memory byte to control how the camera app takes pictures:
@@ -31,15 +36,6 @@ STILL_PICTURES = 1
 VIDEO_CLIPS = 2
 LIVE_STREAM = 3
 
-
-try:
-    shm = shared_memory.SharedMemory('camera_control',create=True, size=1)
-    log.info("Creating shared memory camera_control")
-except FileExistsError:
-    shm = shared_memory.SharedMemory('camera_control',create=False, size=1)
-
-# Default to taking still pictures
-shm.buf[0]=STILL_PICTURES
 
 
 def encode(x):
@@ -87,19 +83,20 @@ def get_photo_paths(limit=6, page=0):
 
 @app.route('/')
 def home():
+    global photo_mode
     image_paths, _ = get_photo_paths(6, 0)
 
-    if shm.buf[0] == TURN_OFF_PICTURES:
+    if photo_mode == TURN_OFF_PICTURES:
         camera_state = 2
-    elif shm.buf[0] == STILL_PICTURES or shm.buf[0] == VIDEO_CLIPS:
+    elif photo_mode == STILL_PICTURES or  photo_mode == VIDEO_CLIPS:
         camera_state = 1
     else:
         camera_state = 0
     
     motion_state = 1
-    if shm.buf[0] == STILL_PICTURES:
+    if photo_mode == STILL_PICTURES:
         motion_state = 1
-    elif shm.buf[0] == VIDEO_CLIPS:
+    elif photo_mode == VIDEO_CLIPS:
         motion_state = 2
 
     return render_template('index.html', images=image_paths, camera_state=camera_state, motion_state=motion_state)
@@ -205,8 +202,10 @@ def gen():
 @app.route('/video_feed')
 def video_feed():
     """Video streaming route. Put this in the src attribute of an img tag."""
-    shm.buf[0] = TURN_OFF_PICTURES
-    log.info(f"SM:{shm.buf[0]}")
+    global photo_mode
+
+    photo_mode = TURN_OFF_PICTURES
+    log.info(f"SM:{photo_mode}")
     return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
@@ -216,29 +215,37 @@ def capture_video():
     Start to capture short video instead of still images
     :return: Success
     """
-    shm.buf[0] = VIDEO_CLIPS
-    log.info(f"SM:{shm.buf[0]}")
+    global photo_mode
+
+    photo_mode = VIDEO_CLIPS
+    log.info(f"SM:{photo_mode}")
     return jsonify({'message': 'Video capture started'}), 201
 
 
 @app.route('/capture_image')
 def capture_image():
-    shm.buf[0] = STILL_PICTURES
-    log.info(f"SM:{shm.buf[0]}")
+    global photo_mode
+
+    photo_mode = STILL_PICTURES
+    log.info(f"SM:{photo_mode}")
     return "Success", 201
 
 
 @app.route('/stop_camera')
 def stop_camera():
-    shm.buf[0] = TURN_OFF_PICTURES
-    log.info(f"SM:{shm.buf[0]}")
+    global photo_mode
+
+    photo_mode = TURN_OFF_PICTURES
+    log.info(f"SM:{photo_mode}")
     return "Success", 201
 
 
 @app.route('/watch_live')
 def watch_live():
-    shm.buf[0] = TURN_OFF_PICTURES
-    log.info(f"SM:{shm.buf[0]}")
+    global photo_mode
+
+    photo_mode = TURN_OFF_PICTURES
+    log.info(f"SM:{photo_mode}")
     return jsonify({'message': 'Live stream started'}), 201
 
 

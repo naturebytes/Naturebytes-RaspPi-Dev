@@ -10,7 +10,6 @@ import RPi.GPIO as GPIO
 
 from log             import log
 from subprocess      import run
-from multiprocessing import shared_memory
 
 # Logging all of the camera's activity to the "naturebytes_camera_log" file. If you want to watch what your camera
 # is doing step by step you can open a Terminal window and type "cd /Naturebytes/Scripts" and then type
@@ -27,13 +26,6 @@ GPIO.setmode(GPIO.BOARD)
 GPIO.setup(SENSOR_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(BATTERY_PIN, GPIO.IN)
 
-try:
-    shm = shared_memory.SharedMemory('camera_control',create=True, size=1)
-    log.info("Created shared memory camera_control")
-    shm.buf[0] = 1
-except FileExistsError:
-    shm = shared_memory.SharedMemory('camera_control',create=False, size=1)
-
 
 def what_os():
     path = "/etc/os-release"
@@ -43,12 +35,12 @@ def what_os():
     return os_release
 
 
-def take_photo(command, save_to, use_overlay, video):
+def take_photo(command, save_to, use_overlay, mode):
     """
     Take a photo and if necessary add overlay
     :param command: str: command string to send
     :param use_overlay: bool: use an overlay or not
-    :param video: bool: this is video if True else still
+    :param mode: 1 - still, 2-short video
     :return: None
     """
     # Recording that a PIR trigger was detected and logging the battery level at this time
@@ -58,7 +50,7 @@ def take_photo(command, save_to, use_overlay, video):
     # Assigning a variable so we can create a photo JPG file that contains the date and time as its name
     now = arrow.now().format('YYYY-MM-DD_HH:mm:ss')
 
-    if video:
+    if mode:
         photo = now + '.h264'
     else:
         photo = now +'.jpg'
@@ -92,24 +84,24 @@ def take_photo(command, save_to, use_overlay, video):
         run(["mv",f"./{photo}",f"{save_to}"])
 
 
-def camera(save_to='./', use_overlay=False, video=False):
+def camera(mode, save_to='./', use_overlay=False):
 
     # Starting with Bookworm the cammand name changed
     os_release = what_os()
     version = os_release.get('VERSION')
     if '12' in version:
-        cam_command = 'rpicam-still' if not video else 'rpicam-vid -t 10s'
+        call  = 'rpicam'
     else:
-        cam_command = 'libcamera-still' if not video else 'libcamera-vid -t 10s'
+        call = 'libcamera'
 
     while True:
         # Map the state of the camera to our input pins (jumper cables connected to your PIR)
         if GPIO.input(SENSOR_PIN):
-            log.info(f"SM:{shm.buf[0]}")
-            if shm.buf[0]:
-                video = False if shm.buf[0] == 1 else True
-                take_photo(cam_command, save_to, use_overlay, video)
-            time.sleep(20)
+            log.info(f"Mode {video}")
+            if mode:
+                cam_command = f"{call}-still" if mode == 1 else f"{call}-vid -t 10s"
+                take_photo(cam_command, save_to, use_overlay, mode)
+            time.sleep(10)
 
 
 if __name__ == "__main__":
@@ -117,11 +109,11 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser( prog='Capture camera images')
     save_to = '/usr/local/src/static/photos'
     overlay = True
-    video = False
+    video = 1
 
     args.add_argument('-s', '--save_to', type=str, default=save_to)
     args.add_argument('-o', '--overlay', action='store_true', default=False)
-    args.add_argument('-v', '--video',   action='store_true', default=False)
+    args.add_argument('-v', '--video',   type=int, default=1)
 
     values = args.parse_args()
-    camera(values.save_to, values.overlay, values.video)
+    camera(values.video, values.save_to, values.overlay)
