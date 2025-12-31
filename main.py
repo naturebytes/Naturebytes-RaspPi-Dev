@@ -148,17 +148,21 @@ def camera(save_to='./', use_overlay=False):
 
         time.sleep(1)
 
+    last_photo = arrow.now()
     while not quit:
         # Map the state of the camera to our input pins (jumper cables connected to your PIR)
         trigger = GPIO.input(SENSOR_PIN)
         log.info(f"SM:{shm.buf[0]} motion:{trigger}")
         if shm.buf[0] in (STILL_PICTURES, VIDEO_CLIPS):
-            if trigger:
+            elapsed = last_photo - arrow.now()
+            if trigger and elapsed.seconds > 600:
                 video = False if shm.buf[0] == 1 else True
                 cam_command = 'rpicam-still -e png' if not video else 'rpicam-vid -t 10s'
 
                 log.info(f"Command{cam_command}")
                 take_photo(cam_command, save_to, use_overlay, video)
+                last_photo = arrow.now()
+
             time.sleep(10)
         else:
             time.sleep(1)
